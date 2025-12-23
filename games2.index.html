@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>雙人對戰遊戲合集</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #1a202c;
+            color: white;
+            font-family: 'Microsoft JhengHei', sans-serif;
+            overflow: hidden;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        canvas {
+            background: #000;
+            border: 4px solid #4a5568;
+            border-radius: 8px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            max-width: 95vw;
+            max-height: 70vh;
+        }
+        .btn {
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+        .btn:hover {
+            transform: scale(1.05);
+        }
+        .active-btn {
+            background-color: #4299e1 !important;
+            box-shadow: 0 0 15px #4299e1;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="mt-6 mb-4 text-center">
+        <h1 class="text-3xl font-bold mb-4">雙人同屏競技場</h1>
+        <div class="flex gap-4 justify-center">
+            <button id="btnPong" class="btn px-6 py-2 bg-gray-700 rounded-full font-bold active-btn" onclick="switchGame('pong')">彈跳乒乓</button>
+            <button id="btnBreakout" class="btn px-6 py-2 bg-gray-700 rounded-full font-bold" onclick="switchGame('breakout')">打磚塊競賽</button>
+        </div>
+    </div>
+
+    <div id="game-container" class="relative">
+        <canvas id="gameCanvas" width="800" height="500"></canvas>
+        <div id="overlay" class="absolute inset-0 flex items-center justify-center bg-black bg-opacity-70 hidden">
+            <div class="text-center">
+                <h2 id="winnerText" class="text-5xl font-bold mb-6 text-yellow-400">玩家 1 獲勝！</h2>
+                <button class="px-8 py-3 bg-green-600 hover:bg-green-500 rounded-lg text-xl font-bold" onclick="resetGame()">重新開始</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-6 grid grid-cols-2 gap-10 text-sm opacity-80 w-full max-w-2xl px-4">
+        <div class="text-center p-4 bg-blue-900/20 rounded-lg">
+            <p class="font-bold text-blue-400 text-lg">玩家 1 (左側)</p>
+            <p class="mt-1">控制：W (向上) / S (向下)</p>
+            <p class="text-xs text-gray-400 mt-1">打磚塊模式下控制擋板左右移動</p>
+        </div>
+        <div class="text-center p-4 bg-red-900/20 rounded-lg">
+            <p class="font-bold text-red-400 text-lg">玩家 2 (右側)</p>
+            <p class="mt-1">控制：↑ (向上) / ↓ (向下)</p>
+            <p class="text-xs text-gray-400 mt-1">打磚塊模式下控制擋板左右移動</p>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const overlay = document.getElementById('overlay');
+        const winnerText = document.getElementById('winnerText');
+
+        let currentGame = 'pong';
+        let gameActive = true;
+        let score1 = 0;
+        let score2 = 0;
+        const winningScore = 5;
+
+        // 按鍵狀態：使用物件儲存多鍵狀態
+        const keys = {};
+        window.addEventListener('keydown', e => {
+            keys[e.code] = true;
+            // 防止頁面滾動
+            if(["ArrowUp","ArrowDown","KeyW","KeyS"].includes(e.code)) e.preventDefault();
+        });
+        window.addEventListener('keyup', e => keys[e.code] = false);
+
+        // 遊戲物件
+        let ball1, ball2, p1, p2, bricks1, bricks2;
+
+        function initPong() {
+            p1 = { x: 20, y: 205, w: 15, h: 90, color: '#3b82f6' };
+            p2 = { x: 765, y: 205, w: 15, h: 90, color: '#ef4444' };
+            ball1 = { x: 400, y: 250, r: 8, dx: 4, dy: 4, color: '#fff' };
+            score1 = 0;
+            score2 = 0;
+        }
+
+        function initBreakout() {
+            const paddleW = 80;
+            const paddleH = 15;
+            p1 = { x: 200 - paddleW/2, y: 460, w: paddleW, h: paddleH, color: '#3b82f6' };
+            p2 = { x: 600 - paddleW/2, y: 460, w: paddleW, h: paddleH, color: '#ef4444' };
+            
+            ball1 = { x: 200, y: 300, r: 8, dx: 3, dy: -3, color: '#fff' };
+            ball2 = { x: 600, y: 300, r: 8, dx: -3, dy: -3, color: '#fff' };
+            
+            score1 = 0; // 這裡是擊碎的磚塊數
+            score2 = 0;
+            
+            bricks1 = createBricks(0);
+            bricks2 = createBricks(400);
+        }
+
+        function createBricks(offsetX) {
+            const rows = 4;
+            const cols = 6;
+            const padding = 10;
+            const width = 50;
+            const height = 20;
+            const b = [];
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    b.push({
+                        x: offsetX + 50 + c * (width + padding),
+                        y: 50 + r * (height + padding),
+                        w: width,
+                        h: height,
+                        active: true
+                    });
+                }
+            }
+            return b;
+        }
+
+        function switchGame(type) {
+            currentGame = type;
+            document.getElementById('btnPong').classList.toggle('active-btn', type === 'pong');
+            document.getElementById('btnBreakout').classList.toggle('active-btn', type === 'breakout');
+            resetGame();
+        }
+
+        function resetGame() {
+            gameActive = true;
+            overlay.classList.add('hidden');
+            if (currentGame === 'pong') initPong();
+            else initBreakout();
+        }
+
+        function updatePong() {
+            // 玩家 1 (W/S)
+            if (keys['KeyW'] && p1.y > 0) p1.y -= 7;
+            if (keys['KeyS'] && p1.y < canvas.height - p1.h) p1.y += 7;
+            // 玩家 2 (Up/Down)
+            if (keys['ArrowUp'] && p2.y > 0) p2.y -= 7;
+            if (keys['ArrowDown'] && p2.y < canvas.height - p2.h) p2.y += 7;
+
+            ball1.x += ball1.dx;
+            ball1.y += ball1.dy;
+
+            if (ball1.y - ball1.r < 0 || ball1.y + ball1.r > canvas.height) ball1.dy *= -1;
+
+            if (ball1.dx < 0 && ball1.x - ball1.r < p1.x + p1.w && ball1.y > p1.y && ball1.y < p1.y + p1.h) {
+                ball1.dx = Math.abs(ball1.dx) * 1.05;
+                ball1.dy += (Math.random() - 0.5) * 2;
+            }
+            if (ball1.dx > 0 && ball1.x + ball1.r > p2.x && ball1.y > p2.y && ball1.y < p2.y + p2.h) {
+                ball1.dx = -Math.abs(ball1.dx) * 1.05;
+                ball1.dy += (Math.random() - 0.5) * 2;
+            }
+
+            if (ball1.x < 0) { score2++; resetBall(); }
+            if (ball1.x > canvas.width) { score1++; resetBall(); }
+            
+            if (score1 >= winningScore || score2 >= winningScore) {
+                endGame(score1 >= winningScore ? "玩家 1 獲勝！" : "玩家 2 獲勝！", score1 >= winningScore ? "#3b82f6" : "#ef4444");
+            }
+        }
+
+        function resetBall() {
+            ball1.x = 400; ball1.y = 250;
+            ball1.dx = (Math.random() > 0.5 ? 4 : -4);
+            ball1.dy = (Math.random() > 0.5 ? 3 : -3);
+        }
+
+        function updateBreakout() {
+            // 玩家 1 (W/S 控制左右)
+            if (keys['KeyW'] && p1.x > 10) p1.x -= 8;
+            if (keys['KeyS'] && p1.x < 390 - p1.w) p1.x += 8;
+            // 玩家 2 (Up/Down 控制左右)
+            if (keys['ArrowUp'] && p2.x > 410) p2.x -= 8;
+            if (keys['ArrowDown'] && p2.x < 790 - p2.w) p2.x += 8;
+
+            // 更新兩顆球
+            [ {b: ball1, p: p1, br: bricks1, scoreKey: 'score1', side: 'L'}, 
+              {b: ball2, p: p2, br: bricks2, scoreKey: 'score2', side: 'R'} ].forEach(game => {
+                const b = game.b;
+                b.x += b.dx;
+                b.y += b.dy;
+
+                // 牆壁碰撞
+                const leftBound = game.side === 'L' ? 0 : 400;
+                const rightBound = game.side === 'L' ? 400 : 800;
+
+                if (b.x - b.r < leftBound || b.x + b.r > rightBound) b.dx *= -1;
+                if (b.y - b.r < 0) b.dy *= -1;
+
+                // 擋板碰撞
+                if (b.dy > 0 && b.y + b.r > game.p.y && b.x > game.p.x && b.x < game.p.x + game.p.w) {
+                    b.dy *= -1;
+                    b.y = game.p.y - b.r;
+                }
+
+                // 磚塊碰撞
+                game.br.forEach(brick => {
+                    if (brick.active && b.x > brick.x && b.x < brick.x + brick.w && b.y - b.r < brick.y + brick.h && b.y + b.r > brick.y) {
+                        brick.active = false;
+                        b.dy *= -1;
+                        if (game.scoreKey === 'score1') score1++; else score2++;
+                    }
+                });
+
+                // 掉落
+                if (b.y > canvas.height) {
+                    b.x = game.side === 'L' ? 200 : 600;
+                    b.y = 300;
+                    b.dy = -3;
+                }
+            });
+
+            // 檢查勝利
+            if (bricks1.every(b => !b.active)) endGame("玩家 1 掃空磚塊！獲勝", "#3b82f6");
+            if (bricks2.every(b => !b.active)) endGame("玩家 2 掃空磚塊！獲勝", "#ef4444");
+        }
+
+        function endGame(text, color) {
+            gameActive = false;
+            winnerText.innerText = text;
+            winnerText.style.color = color;
+            overlay.classList.remove('hidden');
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (currentGame === 'pong') {
+                // 分數
+                ctx.font = "bold 60px Arial";
+                ctx.fillStyle = "rgba(255,255,255,0.2)";
+                ctx.fillText(score1, 200, 100);
+                ctx.fillText(score2, 600, 100);
+
+                ctx.fillStyle = "rgba(255,255,255,0.1)";
+                ctx.fillRect(400, 0, 2, canvas.height);
+                
+                ctx.fillStyle = p1.color;
+                ctx.fillRect(p1.x, p1.y, p1.w, p1.h);
+                ctx.fillStyle = p2.color;
+                ctx.fillRect(p2.x, p2.y, p2.w, p2.h);
+                
+                ctx.beginPath();
+                ctx.arc(ball1.x, ball1.y, ball1.r, 0, Math.PI*2);
+                ctx.fillStyle = ball1.color;
+                ctx.fill();
+            } else {
+                // 中間分隔線
+                ctx.fillStyle = "#4a5568";
+                ctx.fillRect(398, 0, 4, canvas.height);
+
+                // 分數 (已擊碎數)
+                ctx.font = "bold 20px Arial";
+                ctx.fillStyle = "rgba(255,255,255,0.5)";
+                ctx.fillText(`進度: ${score1}/24`, 50, 30);
+                ctx.fillText(`進度: ${score2}/24`, 450, 30);
+
+                // 繪製擋板與球
+                [p1, p2].forEach(p => {
+                    ctx.fillStyle = p.color;
+                    ctx.fillRect(p.x, p.y, p.w, p.h);
+                });
+                [ball1, ball2].forEach(b => {
+                    ctx.beginPath();
+                    ctx.arc(b.x, b.y, b.r, 0, Math.PI*2);
+                    ctx.fillStyle = "#fff";
+                    ctx.fill();
+                });
+
+                // 繪製磚塊
+                [bricks1, bricks2].forEach((set, idx) => {
+                    set.forEach(brick => {
+                        if (brick.active) {
+                            ctx.fillStyle = idx === 0 ? "#3b82f6" : "#ef4444";
+                            ctx.fillRect(brick.x, brick.y, brick.w, brick.h);
+                            ctx.strokeStyle = "#000";
+                            ctx.strokeRect(brick.x, brick.y, brick.w, brick.h);
+                        }
+                    });
+                });
+            }
+
+            if (gameActive) {
+                if (currentGame === 'pong') updatePong();
+                else updateBreakout();
+            }
+            requestAnimationFrame(draw);
+        }
+
+        initPong();
+        draw();
+    </script>
+</body>
+</html>
